@@ -14,6 +14,7 @@ public class JobManager {
 
 	private Config config = null;
 	private ExecutorService threadPool = null;
+	private boolean active = false;
 
 	private static final int default_thread_count = 1;
 	private int threadCount = default_thread_count;
@@ -39,6 +40,7 @@ public class JobManager {
 			threadCount = default_thread_count;
 		}
 		threadPool = Executors.newFixedThreadPool(threadCount);
+		active = true;
 		for (int i = 0; i < threadCount; i++) {
 			JobAgent agent = new JobAgent("JobAgent" + i, this);
 			threadPool.submit(agent);
@@ -161,7 +163,8 @@ public class JobManager {
 		}
 	}
 
-	public void close() {
+	public synchronized void close() {
+		active = false;
 		for (int i = 0; i < threadCount; i++) {
 			Job k = new KillJob();
 			try {
@@ -176,5 +179,9 @@ public class JobManager {
 		} catch (InterruptedException e) {
 			e.printStackTrace();
 		}
+	}
+
+	public synchronized boolean isActive() {
+		return active;
 	}
 }

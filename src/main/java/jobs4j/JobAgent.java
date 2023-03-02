@@ -24,7 +24,7 @@ public class JobAgent implements Runnable {
 		}
 		Job job = null;
 
-		while (true) {
+		while (manager.isActive()) {
 			job = manager.getNextJob();
 			if (job != null) {
 				try {
