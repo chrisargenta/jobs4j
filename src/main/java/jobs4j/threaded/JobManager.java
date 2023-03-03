@@ -1,16 +1,40 @@
-package jobs4j;
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ * 
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.    
+ */
+
+package jobs4j.threaded;
 
 import java.util.Hashtable;
 import java.util.LinkedList;
 import java.util.Queue;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import jobs4j.Job;
+import jobs4j.JobException;
+import jobs4j.JobObserver;
+import jobs4j.JobQueue;
+import jobs4j.JobStatus;
 import jobs4j.utils.Config;
-import jobs4j.utils.Uid;
 
-public class JobManager {
+public class JobManager implements JobQueue {
 
 	private Config config = null;
 	private ExecutorService threadPool = null;
@@ -42,37 +66,26 @@ public class JobManager {
 		threadPool = Executors.newFixedThreadPool(threadCount);
 		active = true;
 		for (int i = 0; i < threadCount; i++) {
-			JobAgent agent = new JobAgent("JobAgent" + i, this);
+			JobWorker agent = new JobWorker("JobWorker" + i, this);
 			threadPool.submit(agent);
 		}
 	}
 
 	// Keeps a local copy of Jobs that can be observed
-	private Hashtable<JobId, Job> jobs = new Hashtable<JobId, Job>();
-
+	private Hashtable<UUID, Job> jobs = new Hashtable<UUID, Job>();
 	private Queue<Job> queue = new LinkedList<Job>();
-
-	private int count = 0;
-
-	private JobId getNewJobId(Job job) {
-		JobId jobId = new JobId();
-		jobId.id = "job:" + (count++) + ":" + Uid.getUid();
-		job.setJobId(jobId);
-		return jobId;
-	}
 
 	/*
 	 * Submit a Job to the JobManager returns a JobId
 	 */
-	public synchronized JobId submit(Job job) throws JobException {
-		if (job.getId() != null)
-			throw new JobException("Submitted a Job that already had a JobId.");
-		JobId id = getNewJobId(job);
-		jobs.put(id, job);
+	public synchronized UUID submit(Job job) throws JobException {
+		if (!active)
+			throw new JobException("Cannot submit a new Job to closed queue.");
+		jobs.put(job.getId(), job);
 		queue.add(job);
-		job.status = JobStatus.SUBMITTED;
-		job.percentDone = 0.0;
-		return id;
+		job.setStatus(JobStatus.SUBMITTED);
+		job.setPercentDone(0.0);
+		return job.getId();
 	}
 
 	/*
@@ -80,9 +93,9 @@ public class JobManager {
 	 * track them they should be cleared. Otherwise, these will stick around until
 	 * the system is restarted. *
 	 */
-	public synchronized void clearJob(JobId id) {
-		if (jobs.containsKey(id)) {
-			jobs.remove(id);
+	public synchronized void clearJob(UUID uuid) {
+		if (jobs.containsKey(uuid)) {
+			jobs.remove(uuid);
 		}
 	}
 
@@ -92,21 +105,21 @@ public class JobManager {
 		}
 	}
 
-	public synchronized Job getJob(JobId id) throws JobException {
+	public synchronized Job getJob(UUID id) throws JobException {
 		if (jobs.containsKey(id)) {
 			return jobs.get(id);
 		}
 		throw new JobException("No such Job");
 	}
 
-	public synchronized JobStatus getJobStatus(JobId id) throws JobException {
+	public synchronized JobStatus getJobStatus(UUID id) throws JobException {
 		if (jobs.containsKey(id)) {
 			return jobs.get(id).getStatus();
 		}
 		throw new JobException("No such Job");
 	}
 
-	public synchronized void observeJob(JobId id, JobObserver observer) throws JobException {
+	public synchronized void observeJob(UUID id, JobObserver observer) throws JobException {
 		if (jobs.containsKey(id)) {
 			jobs.get(id).observe(observer);
 		} else {
@@ -114,13 +127,13 @@ public class JobManager {
 		}
 	}
 
-	protected synchronized void updateJob(JobId id, JobStatus status) {
-		if (jobs.containsKey(id)) {
-			jobs.get(id).setStatus(status);
+	protected synchronized void updateJob(UUID uuid, JobStatus status) {
+		if (jobs.containsKey(uuid)) {
+			jobs.get(uuid).setStatus(status);
 		}
 	}
 
-	protected synchronized void updateJob(JobId id, double percentDone) {
+	protected synchronized void updateJob(UUID id, double percentDone) {
 		if (jobs.containsKey(id)) {
 			jobs.get(id).setPercentDone(percentDone);
 		}
@@ -144,7 +157,7 @@ public class JobManager {
 	 * Don't use this unless you have to... but it seemed useful to have a blocking
 	 * technique
 	 */
-	public Job waitFor(JobId id) throws JobException, InterruptedException {
+	public Job waitFor(UUID id) throws JobException, InterruptedException {
 		while (true) {
 			if (!jobs.containsKey(id))
 				throw new JobException("No such JobId");
@@ -157,13 +170,19 @@ public class JobManager {
 		}
 	}
 
+	public void waitForAll() throws InterruptedException {
+		while (jobAvailible()) {
+			Thread.sleep(1000);
+		}
+	}
+
 	protected class KillJob extends Job {
 		@Override
 		public void execute() {
 		}
 	}
 
-	public synchronized void close() {
+	public void close() {
 		active = false;
 		for (int i = 0; i < threadCount; i++) {
 			Job k = new KillJob();
@@ -181,7 +200,8 @@ public class JobManager {
 		}
 	}
 
-	public synchronized boolean isActive() {
+	public boolean isActive() {
 		return active;
 	}
+
 }

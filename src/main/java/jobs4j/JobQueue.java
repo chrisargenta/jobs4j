@@ -21,25 +21,29 @@ package jobs4j;
 
 import java.util.UUID;
 
-public abstract class JobObserver {
+public interface JobQueue {
 
-	// Status updates from jobs must be implemented by Observer
+	// Add jobs to queue
+	public UUID submit(Job job) throws JobException;
 
-	protected abstract void onStatus(UUID id, JobStatus status);
+	// Clear out completed jobs from queue
+	public void clearJob(UUID id);
 
-	protected abstract void onPercentDone(UUID id, double percentDone);
+	public void clearJob(Job job);
 
-	public abstract void onCompletion(Job job);
+	// querying the queue and jobs
+	public Job getJob(UUID id) throws JobException;
 
-	// Messaging from jobs defaults to outputting simple messages to console
-	// Consider if logging framework might be a better idea for your application
+	public JobStatus getJobStatus(UUID id) throws JobException;
 
-	public void onMessage(UUID id, String message) {
-		System.out.println(Thread.currentThread().getName() + "\t" + id + "\t" + message);
-	}
+	public void observeJob(UUID id, JobObserver observer) throws JobException;
 
-	public void onException(UUID id, Exception e) {
-		System.err.println(Thread.currentThread().getName() + "\t" + id + "\t" + e.getLocalizedMessage());
-	}
+	// Blocking calls for job completion, consider using a job observer instead
+	public Job waitFor(UUID id) throws JobException, InterruptedException;
+
+	public void waitForAll() throws InterruptedException;
+
+	// to shutdown the queue
+	public void close();
 
 }
